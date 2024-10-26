@@ -1,38 +1,24 @@
-package wkhttp
+package vh
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/opentracing/opentracing-go"
-	"github.com/vera-byte/vgo-lib/pkg/cache"
 	"github.com/vera-byte/vgo-lib/pkg/log"
 	"go.uber.org/zap"
 )
 
-// UserRole 用户角色
-type UserRole string
-
-const (
-	// Admin 管理员
-	Admin UserRole = "admin"
-	// SuperAdmin 超级管理员
-	SuperAdmin UserRole = "superAdmin"
-)
-
-// WKHttp WKHttp
-type WKHttp struct {
+type VGoHttp struct {
 	r    *gin.Engine
 	pool sync.Pool
 }
 
 // New New
-func New() *WKHttp {
-	l := &WKHttp{
+func New() *VGoHttp {
+	l := &VGoHttp{
 		r:    gin.New(),
 		pool: sync.Pool{},
 	}
@@ -86,7 +72,7 @@ func (c *Context) ResponseErrorWithStatus(err error, status int) {
 
 // GetPage 获取页参数
 func (c *Context) GetPage() (pageIndex int64, pageSize int64) {
-	pageIndex, _ = strconv.ParseInt(c.Query("page_index"), 10, 64)
+	pageIndex, _ = strconv.ParseInt(c.Query("page"), 10, 64)
 	pageSize, _ = strconv.ParseInt(c.Query("page_size"), 10, 64)
 	if pageIndex <= 0 {
 		pageIndex = 1
@@ -114,60 +100,16 @@ func (c *Context) ResponseWithStatus(status int, data interface{}) {
 	c.JSON(status, data)
 }
 
-// GetLoginUID 获取当前登录的用户uid
-func (c *Context) GetLoginUID() string {
-	return c.MustGet("uid").(string)
-}
-
-// GetAppID appID
-func (c *Context) GetAppID() string {
-	return c.GetHeader("appid")
-}
-
-// GetLoginName 获取当前登录的用户名字
-func (c *Context) GetLoginName() string {
-	return c.MustGet("name").(string)
-}
-
-// GetLoginRole 获取当前登录用户的角色
-func (c *Context) GetLoginRole() string {
-	return c.GetString("role")
-}
-
 // GetSpanContext 获取当前请求的span context
 func (c *Context) GetSpanContext() opentracing.SpanContext {
 	return c.MustGet("spanContext").(opentracing.SpanContext)
 }
 
-// CheckLoginRole 检查登录角色权限
-func (c *Context) CheckLoginRole() error {
-	role := c.GetLoginRole()
-	if role == "" {
-		return errors.New("登录用户角色错误")
-	}
-	if role != string(Admin) && role != string(SuperAdmin) {
-		return errors.New("该用户无权执行此操作")
-	}
-	return nil
-}
-
-// CheckLoginRoleIsSuperAdmin 检查登录用户为超级管理员
-func (c *Context) CheckLoginRoleIsSuperAdmin() error {
-	role := c.GetLoginRole()
-	if role == "" {
-		return errors.New("登录用户角色错误")
-	}
-	if role != string(SuperAdmin) {
-		return errors.New("该用户无权执行此操作")
-	}
-	return nil
-}
-
 // HandlerFunc HandlerFunc
 type HandlerFunc func(c *Context)
 
-// WKHttpHandler WKHttpHandler
-func (l *WKHttp) WKHttpHandler(handlerFunc HandlerFunc) gin.HandlerFunc {
+// VGoHttpHandler VGoHttpHandler
+func (l *VGoHttp) VGoHttpHandler(handlerFunc HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		hc := l.pool.Get().(*Context)
 		hc.reset()
@@ -181,139 +123,81 @@ func (l *WKHttp) WKHttpHandler(handlerFunc HandlerFunc) gin.HandlerFunc {
 }
 
 // Run Run
-func (l *WKHttp) Run(addr ...string) error {
+func (l *VGoHttp) Run(addr ...string) error {
 	return l.r.Run(addr...)
 }
 
-func (l *WKHttp) RunTLS(addr, certFile, keyFile string) error {
+func (l *VGoHttp) RunTLS(addr, certFile, keyFile string) error {
 	return l.r.RunTLS(addr, certFile, keyFile)
 }
 
 // POST POST
-func (l *WKHttp) POST(relativePath string, handlers ...HandlerFunc) {
+func (l *VGoHttp) POST(relativePath string, handlers ...HandlerFunc) {
 	l.r.POST(relativePath, l.handlersToGinHandleFuncs(handlers)...)
 }
 
 // GET GET
-func (l *WKHttp) GET(relativePath string, handlers ...HandlerFunc) {
+func (l *VGoHttp) GET(relativePath string, handlers ...HandlerFunc) {
 	l.r.GET(relativePath, l.handlersToGinHandleFuncs(handlers)...)
 }
 
 // Any Any
-func (l *WKHttp) Any(relativePath string, handlers ...HandlerFunc) {
+func (l *VGoHttp) Any(relativePath string, handlers ...HandlerFunc) {
 	l.r.Any(relativePath, l.handlersToGinHandleFuncs(handlers)...)
 }
 
 // Static Static
-func (l *WKHttp) Static(relativePath string, root string) {
+func (l *VGoHttp) Static(relativePath string, root string) {
 	l.r.Static(relativePath, root)
 }
 
 // LoadHTMLGlob LoadHTMLGlob
-func (l *WKHttp) LoadHTMLGlob(pattern string) {
+func (l *VGoHttp) LoadHTMLGlob(pattern string) {
 	l.r.LoadHTMLGlob(pattern)
 }
 
 // UseGin UseGin
-func (l *WKHttp) UseGin(handlers ...gin.HandlerFunc) {
+func (l *VGoHttp) UseGin(handlers ...gin.HandlerFunc) {
 	l.r.Use(handlers...)
 }
 
 // Use Use
-func (l *WKHttp) Use(handlers ...HandlerFunc) {
+func (l *VGoHttp) Use(handlers ...HandlerFunc) {
 	l.r.Use(l.handlersToGinHandleFuncs(handlers)...)
 }
 
 // ServeHTTP ServeHTTP
-func (l *WKHttp) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (l *VGoHttp) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	l.r.ServeHTTP(w, req)
 }
 
 // Group Group
-func (l *WKHttp) Group(relativePath string, handlers ...HandlerFunc) *RouterGroup {
+func (l *VGoHttp) Group(relativePath string, handlers ...HandlerFunc) *RouterGroup {
 	return newRouterGroup(l.r.Group(relativePath, l.handlersToGinHandleFuncs(handlers)...), l)
 }
 
 // HandleContext HandleContext
-func (l *WKHttp) HandleContext(c *Context) {
+func (l *VGoHttp) HandleContext(c *Context) {
 	l.r.HandleContext(c.Context)
 }
 
-func (l *WKHttp) handlersToGinHandleFuncs(handlers []HandlerFunc) []gin.HandlerFunc {
+func (l *VGoHttp) handlersToGinHandleFuncs(handlers []HandlerFunc) []gin.HandlerFunc {
 	newHandlers := make([]gin.HandlerFunc, 0, len(handlers))
 	if handlers != nil {
 		for _, handler := range handlers {
-			newHandlers = append(newHandlers, l.WKHttpHandler(handler))
+			newHandlers = append(newHandlers, l.VGoHttpHandler(handler))
 		}
 	}
 	return newHandlers
 }
 
-// AuthMiddleware 认证中间件
-func (l *WKHttp) AuthMiddleware(cache cache.Cache, tokenPrefix string) HandlerFunc {
-
-	return func(c *Context) {
-		token := c.GetHeader("token")
-		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"msg": "token不能为空，请先登录！",
-			})
-			return
-		}
-		uidAndName := GetLoginUID(token, tokenPrefix, cache)
-		if strings.TrimSpace(uidAndName) == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"msg": "请先登录！",
-			})
-			return
-		}
-		uidAndNames := strings.Split(uidAndName, "@")
-		if len(uidAndNames) < 2 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"msg": "token有误！",
-			})
-			return
-		}
-		c.Set("uid", uidAndNames[0])
-		c.Set("name", uidAndNames[1])
-		if len(uidAndNames) > 2 {
-			c.Set("role", uidAndNames[2])
-		}
-		c.Next()
-	}
-}
-
-// Api管理员权限中间件
-func (l *WKHttp) ApiAdminMiddleware(manageToken string) HandlerFunc {
-	return func(c *Context) {
-		token := c.GetHeader("manageToken")
-		if token == "" || manageToken != token {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"msg": "无权访问",
-			})
-			return
-		} else {
-			c.Next()
-		}
-	}
-}
-
-// GetLoginUID GetLoginUID
-func GetLoginUID(token string, tokenPrefix string, cache cache.Cache) string {
-	uid, err := cache.Get(tokenPrefix + token)
-	if err != nil {
-		return ""
-	}
-	return uid
-}
-
 // RouterGroup RouterGroup
 type RouterGroup struct {
 	*gin.RouterGroup
-	L *WKHttp
+	L *VGoHttp
 }
 
-func newRouterGroup(g *gin.RouterGroup, l *WKHttp) *RouterGroup {
+func newRouterGroup(g *gin.RouterGroup, l *VGoHttp) *RouterGroup {
 	return &RouterGroup{RouterGroup: g, L: l}
 }
 

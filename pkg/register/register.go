@@ -5,12 +5,12 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/vera-byte/vgo-lib/pkg/wkhttp"
+	vh "github.com/vera-byte/vgo-lib/pkg/vgohttp"
 )
 
 // APIRouter api路由者
 type APIRouter interface {
-	Route(r *wkhttp.WKHttp)
+	Route(r *vh.VGoHttp)
 }
 
 // var apiRoutes = make([]APIRouter, 0)

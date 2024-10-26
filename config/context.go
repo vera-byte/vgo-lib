@@ -15,7 +15,7 @@ import (
 	"github.com/vera-byte/vgo-lib/pkg/log"
 	"github.com/vera-byte/vgo-lib/pkg/pool"
 	"github.com/vera-byte/vgo-lib/pkg/redis"
-	"github.com/vera-byte/vgo-lib/pkg/wkhttp"
+	vh "github.com/vera-byte/vgo-lib/pkg/vgohttp"
 )
 
 // Context 配置上下文
@@ -32,7 +32,7 @@ type Context struct {
 	aysncTask     *AsyncTask               // 异步任务
 	timingWheel   *timingwheel.TimingWheel // Time wheel delay task
 
-	httpRouter *wkhttp.WKHttp
+	httpRouter *vh.VGoHttp
 
 	valueMap  sync.Map
 	SetupTask bool // 是否安装task
@@ -113,12 +113,6 @@ func (c *Context) Cache() cache.Cache {
 	return c.NewRedisCache()
 }
 
-// 认证中间件
-func (c *Context) AuthMiddleware(r *wkhttp.WKHttp) wkhttp.HandlerFunc {
-
-	return r.AuthMiddleware(c.Cache(), c.cfg.Cache.TokenCachePrefix)
-}
-
 // GetRedisConn GetRedisConn
 func (c *Context) GetRedisConn() *redis.Conn {
 	return c.NewRedisCache().GetRedisConn()
@@ -131,11 +125,11 @@ func (c *Context) Schedule(interval time.Duration, f func()) *timingwheel.Timer 
 	}, f)
 }
 
-func (c *Context) GetHttpRoute() *wkhttp.WKHttp {
+func (c *Context) GetHttpRoute() *vh.VGoHttp {
 	return c.httpRouter
 }
 
-func (c *Context) SetHttpRoute(r *wkhttp.WKHttp) {
+func (c *Context) SetHttpRoute(r *vh.VGoHttp) {
 	c.httpRouter = r
 }
 

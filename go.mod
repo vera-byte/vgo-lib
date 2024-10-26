@@ -12,6 +12,7 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/gocraft/dbr/v2 v2.7.7
 	github.com/gomarkdown/markdown v0.0.0-20240930133441-72d49d9543d8
+	github.com/judwhite/go-svc v1.2.1
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/olivere/elastic v6.2.37+incompatible
 	github.com/opentracing/opentracing-go v1.2.0
@@ -22,6 +23,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.9.0
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
+	github.com/unrolled/secure v1.17.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.28.0
 	gopkg.in/go-playground/assert.v1 v1.2.1
