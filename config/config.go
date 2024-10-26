@@ -1,0 +1,643 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/spf13/cast"
+	"github.com/spf13/viper"
+	"github.com/vera-byte/vgo-lib/pkg/util"
+	"go.uber.org/zap/zapcore"
+)
+
+type Mode string
+
+const (
+	//debug 模式
+	DebugMode Mode = "debug"
+	// 正式模式
+	ReleaseMode Mode = "release"
+	// 压力测试模式
+	BenchMode Mode = "bench"
+)
+
+// FileService FileService
+type FileService string
+
+const (
+	// FileServiceAliyunOSS 阿里云oss上传服务
+	FileServiceAliyunOSS FileService = "aliyunOSS"
+	// FileServiceSeaweedFS seaweedfs(https://github.com/chrislusf/seaweedfs)
+	FileServiceSeaweedFS FileService = "seaweedFS"
+	// FileServiceMinio minio
+	FileServiceMinio FileService = "minio"
+	// FileServiceQiniu 七牛云上传服务
+	FileServiceQiniu FileService = "qiniu"
+)
+
+func (u FileService) String() string {
+	return string(u)
+}
+
+// Config 配置信息
+type Config struct {
+	vp *viper.Viper // 内部配置对象
+
+	// ---------- 基础配置 ----------
+	Mode                        Mode   // 模式 debug 测试 release 正式 bench 压力测试
+	AppID                       string // APP ID
+	AppName                     string // APP名称
+	Version                     string // 版本
+	RootDir                     string // 数据根目录
+	Addr                        string // 服务监听地址 x.x.x.x:8080
+	GRPCAddr                    string // grpc的通信地址 （建议内网通信）
+	SSLAddr                     string // ssl 监听地址
+	MessageSaveAcrossDevice     bool   // 消息是否跨设备保存（换设备登录消息是否还能同步到老消息）
+	WelcomeMessage              string // 登录注册欢迎语
+	PhoneSearchOff              bool   // 是否关闭手机号搜索
+	OnlineStatusOn              bool   // 是否开启在线状态显示
+	GroupUpgradeWhenMemberCount int    // 当成员数量大于此配置时 自动升级为超级群 默认为 1000
+	EventPoolSize               int64  // 事件任务池大小
+	AdminPwd                    string // 后台管理默认密码
+	// ---------- 外网配置 ----------
+	External struct {
+		IP          string // 外网IP
+		BaseURL     string // 本服务的对外的基础地址
+		H5BaseURL   string // h5页面的基地址 如果没有配置默认未 BaseURL + /web
+		APIBaseURL  string // api的基地址 如果没有配置默认未 BaseURL + /v1
+		WebLoginURL string // web登录地址
+	}
+	// ---------- 日志配置 ----------
+	Logger struct {
+		Dir     string // 日志存储目录
+		Level   zapcore.Level
+		LineNum bool // 是否显示代码行数
+	}
+	// ---------- db相关配置 ----------
+	DB struct {
+		MySQLAddr            string        // mysql的连接信息
+		MySQLMaxOpenConns    int           // 最大连接数
+		MySQLMaxIdleConns    int           // 最大空闲连接数
+		MySQLConnMaxLifetime time.Duration // 连接最大生命周期
+		Migration            bool          // 是否合并数据库
+		RedisAddr            string        // redis地址
+		RedisPass            string        // redis密码
+		AsynctaskRedisAddr   string        // 异步任务的redis地址 不写默认为RedisAddr的地址
+	}
+	// ---------- 分布式配置 ----------
+	Cluster struct {
+		NodeID int //  节点ID 节点ID需要小于1024
+	}
+
+	// ---------- 缓存配置 ----------
+	Cache struct {
+		TokenCachePrefix            string        // token缓存前缀
+		LoginDeviceCachePrefix      string        // 登录设备缓存前缀
+		LoginDeviceCacheExpire      time.Duration // 登录设备缓存过期时间
+		UIDTokenCachePrefix         string        // uidtoken缓存前缀
+		FriendApplyTokenCachePrefix string        // 申请好友的token的前缀
+		FriendApplyExpire           time.Duration // 好友申请过期时间
+		TokenExpire                 time.Duration // token失效时间
+		NameCacheExpire             time.Duration // 名字缓存过期时间
+	}
+	// ---------- 系统账户设置 ----------
+	Account struct {
+		SystemUID           string //系统账号uid
+		FileHelperUID       string // 文件助手uid
+		SystemGroupID       string //系统群ID 需求在app_config表里设置new_user_join_system_group为1才有效
+		SystemGroupName     string // 系统群的名字
+		AdminUID            string //系统管理员账号
+		SystemNoticeComment string //评论我的
+		SystemNoticeFollow  string // 新增关注
+		SystemNoticeLike    string // 收到点赞
+		SystemNoticeMessage string // 系统通知
+
+	}
+
+	// ---------- 文件服务 ----------
+
+	FileService FileService   // 文件服务
+	OSS         OSSConfig     // 阿里云oss配置
+	Minio       MinioConfig   // minio配置
+	Seaweed     SeaweedConfig // seaweedfs配置
+	Qiniu       QiniuConfig   // 七牛云配置
+
+	// ---------- 短信运营商 ----------
+	SMSCode     string // 模拟的短信验证码
+	SMSProvider SMSProvider
+	AliyunSMS   AliyunSMSConfig // aliyun sms
+
+	Organization struct {
+		ImportOn bool // 是否开启导入组织信息
+	}
+	// ---------- 好友 ----------
+	Friend struct {
+		AddedTipsText string // 成为好友系统提示消息
+	}
+	// ---------- 消息搜索 ----------
+	ZincSearch struct {
+		SearchOn           bool   // 是否开启消息搜索
+		APIURL             string // ZincSearch 请求地址
+		ZincUsername       string // ZincSearch 登录用户名
+		ZincPassword       string // ZincSearch 登录密码
+		SyncIntervalSecond int    // 同步消息间隔时间（单位秒）
+		SyncCount          int    // 每张表每次同步数量 默认100条
+	}
+
+	// ---------- tracing ----------
+	Tracing struct {
+		On   bool   // 是否开启tracing
+		Addr string // tracer的地址
+	}
+
+	// ---------- 其他 ----------
+
+	Test bool // 是否是测试模式
+
+	QRCodeInfoURL    string   // 获取二维码信息的URL
+	VisitorUIDPrefix string   // 访客uid的前缀
+	TimingWheelTick  duration // The time-round training interval must be 1ms or more
+	TimingWheelSize  int64    // Time wheel size
+
+	ElasticsearchURL string // elasticsearch 地址
+
+	// ---------- 系统配置  由系统生成,无需用户配置 ----------
+	AppRSAPrivateKey string
+	AppRSAPubKey     string
+}
+
+// New New
+func New() *Config {
+	cfg := &Config{
+		// ---------- 基础配置 ----------
+		Mode:                        ReleaseMode,
+		AppID:                       "-",
+		AppName:                     "-",
+		Addr:                        ":8090",
+		GRPCAddr:                    "0.0.0.0:6979",
+		PhoneSearchOff:              false,
+		OnlineStatusOn:              true,
+		GroupUpgradeWhenMemberCount: 1000,
+		MessageSaveAcrossDevice:     true,
+		EventPoolSize:               100,
+		WelcomeMessage:              "欢迎使用{{appName}}",
+		RootDir:                     "tsdddata",
+		AdminPwd:                    "",
+		// ---------- 外网配置 ----------
+		External: struct {
+			IP          string
+			BaseURL     string
+			H5BaseURL   string
+			APIBaseURL  string
+			WebLoginURL string
+		}{
+			BaseURL:     "",
+			WebLoginURL: "",
+		},
+
+		// ---------- db配置 ----------
+		DB: struct {
+			MySQLAddr            string
+			MySQLMaxOpenConns    int
+			MySQLMaxIdleConns    int
+			MySQLConnMaxLifetime time.Duration
+			Migration            bool
+			RedisAddr            string
+			RedisPass            string
+			AsynctaskRedisAddr   string
+		}{
+			MySQLAddr:            "root:demo@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=true",
+			MySQLMaxOpenConns:    100,
+			MySQLMaxIdleConns:    10,
+			MySQLConnMaxLifetime: time.Second * 60 * 60 * 4, //mysql 默认超时时间为 60*60*8=28800 SetConnMaxLifetime设置为小于数据库超时时间即可
+			Migration:            true,
+			RedisAddr:            "127.0.0.1:6379",
+		},
+		// ---------- 分布式配置 ----------
+		Cluster: struct {
+			NodeID int
+		}{
+			NodeID: 1,
+		},
+		// ---------- 缓存配置 ----------
+		Cache: struct {
+			TokenCachePrefix            string
+			LoginDeviceCachePrefix      string
+			LoginDeviceCacheExpire      time.Duration
+			UIDTokenCachePrefix         string
+			FriendApplyTokenCachePrefix string
+			FriendApplyExpire           time.Duration
+			TokenExpire                 time.Duration
+			NameCacheExpire             time.Duration
+		}{
+			TokenCachePrefix:            "token:",
+			TokenExpire:                 time.Hour * 24 * 30,
+			LoginDeviceCachePrefix:      "login_device:",
+			LoginDeviceCacheExpire:      time.Minute * 5,
+			UIDTokenCachePrefix:         "uidtoken:",
+			FriendApplyTokenCachePrefix: "friend_token:",
+			FriendApplyExpire:           time.Hour * 24 * 15,
+			NameCacheExpire:             time.Hour * 24 * 7,
+		},
+
+		// ---------- 系统账户设置 ----------
+		Account: struct {
+			SystemUID           string
+			FileHelperUID       string
+			SystemGroupID       string
+			SystemGroupName     string
+			AdminUID            string
+			SystemNoticeComment string
+			SystemNoticeFollow  string
+			SystemNoticeLike    string
+			SystemNoticeMessage string
+		}{
+			SystemUID:           "u_10000",
+			SystemGroupID:       "g_10000",
+			SystemGroupName:     "意见反馈群",
+			FileHelperUID:       "fileHelper",
+			AdminUID:            "admin",
+			SystemNoticeComment: "system:notice_comment",
+			SystemNoticeFollow:  "system:notice_follow",
+			SystemNoticeLike:    "system:notice_like",
+			SystemNoticeMessage: "system:notice_message",
+		},
+		// ---------- 文件服务 ----------
+		FileService: FileServiceMinio,
+
+		// ---------- 短信服务 ----------
+		SMSProvider: SMSProviderAliyun,
+
+		// ---------- 好友设置  --------
+
+		Friend: struct {
+			AddedTipsText string
+		}{
+			AddedTipsText: "我们已经是好友了，可以愉快的聊天了！",
+		},
+
+		QRCodeInfoURL: "v1/qrcode/:code",
+
+		Test: GetEnvBool("Test", false),
+
+		VisitorUIDPrefix: "_vt_",
+
+		TimingWheelTick: duration{
+			Duration: time.Millisecond * 10,
+		},
+		TimingWheelSize:  100,
+		ElasticsearchURL: "http://elasticsearch:9200",
+	}
+
+	return cfg
+}
+
+func (c *Config) ConfigureWithViper(vp *viper.Viper) {
+	c.vp = vp
+	intranetIP := getIntranetIP() // 内网IP
+	// #################### 基础配置 ####################
+	c.Mode = Mode(c.getString("mode", string(DebugMode)))
+	c.AppID = c.getString("appID", c.AppID)
+	c.AppName = c.getString("appName", c.AppName)
+	c.RootDir = c.getString("rootDir", c.RootDir)
+	c.Version = c.getString("version", c.Version)
+	c.Addr = c.getString("addr", c.Addr)
+	c.GRPCAddr = c.getString("grpcAddr", c.GRPCAddr)
+	c.SSLAddr = c.getString("sslAddr", c.SSLAddr)
+	c.MessageSaveAcrossDevice = c.getBool("messageSaveAcrossDevice", c.MessageSaveAcrossDevice)
+	c.WelcomeMessage = c.getString("welcomeMessage", c.WelcomeMessage)
+	if strings.TrimSpace(c.WelcomeMessage) != "" {
+		c.WelcomeMessage = strings.ReplaceAll(c.WelcomeMessage, "{{appName}}", c.AppName)
+	}
+	c.PhoneSearchOff = c.getBool("phoneSearchOff", c.PhoneSearchOff)
+	c.OnlineStatusOn = c.getBool("onlineStatusOn", c.OnlineStatusOn)
+	c.GroupUpgradeWhenMemberCount = c.getInt("groupUpgradeWhenMemberCount", c.GroupUpgradeWhenMemberCount)
+	c.EventPoolSize = c.getInt64("eventPoolSize", c.EventPoolSize)
+	c.AdminPwd = c.getString("adminPwd", c.AdminPwd)
+
+	// #################### 外网配置 ####################
+	c.External.IP = c.getString("external.ip", c.External.IP)
+	if strings.TrimSpace(c.External.IP) == "" { // 没配置外网IP就使用内网IP
+		c.External.IP = intranetIP
+	}
+	c.External.WebLoginURL = c.getString("external.webLoginURL", c.External.WebLoginURL)
+	c.External.BaseURL = c.getString("external.baseURL", c.External.BaseURL)
+
+	if strings.TrimSpace(c.External.WebLoginURL) == "" {
+		c.External.WebLoginURL = fmt.Sprintf("http://%s:82", c.External.IP)
+	}
+
+	if strings.TrimSpace(c.External.BaseURL) == "" {
+		c.External.BaseURL = fmt.Sprintf("http://%s:8090", c.External.IP)
+	}
+	if strings.TrimSpace(c.External.H5BaseURL) == "" {
+		c.External.H5BaseURL = fmt.Sprintf("%s/web", c.External.BaseURL)
+	}
+	if strings.TrimSpace(c.External.APIBaseURL) == "" {
+		c.External.APIBaseURL = fmt.Sprintf("%s/v1", c.External.BaseURL)
+	}
+	// #################### 配置日志 ####################
+	c.configureLog()
+	// #################### db ####################
+	c.DB.MySQLAddr = c.getString("db.mysqlAddr", c.DB.MySQLAddr)
+	c.DB.MySQLMaxOpenConns = c.getInt("db.mysqlMaxOpenConns", c.DB.MySQLMaxOpenConns)
+	c.DB.MySQLMaxIdleConns = c.getInt("db.mysqlMaxIdleConns", c.DB.MySQLMaxIdleConns)
+	c.DB.MySQLConnMaxLifetime = c.getDuration("db.mysqlConnMaxLifetime", c.DB.MySQLConnMaxLifetime)
+	c.DB.Migration = c.getBool("db.migration", c.DB.Migration)
+	c.DB.RedisAddr = c.getString("db.redisAddr", c.DB.RedisAddr)
+	c.DB.RedisPass = c.getString("db.redisPass", c.DB.RedisPass)
+	c.DB.AsynctaskRedisAddr = c.getString("db.asynctaskRedisAddr", c.DB.AsynctaskRedisAddr)
+
+	//#################### cluster ####################
+	c.Cluster.NodeID = c.getInt("cluster.nodeID", c.Cluster.NodeID)
+
+	//#################### 缓存配置 ####################
+	c.Cache.TokenCachePrefix = c.getString("cache.tokenCachePrefix", c.Cache.TokenCachePrefix)
+	c.Cache.LoginDeviceCachePrefix = c.getString("cache.loginDeviceCachePrefix", c.Cache.LoginDeviceCachePrefix)
+	c.Cache.LoginDeviceCacheExpire = c.getDuration("cache.loginDeviceCacheExpire", c.Cache.LoginDeviceCacheExpire)
+	c.Cache.UIDTokenCachePrefix = c.getString("cache.uidTokenCachePrefix", c.Cache.UIDTokenCachePrefix)
+	c.Cache.FriendApplyTokenCachePrefix = c.getString("cache.friendApplyTokenCachePrefix", c.Cache.FriendApplyTokenCachePrefix)
+	c.Cache.FriendApplyExpire = c.getDuration("cache.friendApplyExpire", c.Cache.FriendApplyExpire)
+	c.Cache.TokenExpire = c.getDuration("cache.tokenExpire", c.Cache.TokenExpire)
+	c.Cache.NameCacheExpire = c.getDuration("cache.nameCacheExpire", c.Cache.NameCacheExpire)
+
+	//#################### 内置账户配置 ####################
+	c.Account.SystemUID = c.getString("account.systemUID", c.Account.SystemUID)
+	c.Account.FileHelperUID = c.getString("account.fileHelperUID", c.Account.FileHelperUID)
+	c.Account.SystemGroupID = c.getString("account.systemGroupID", c.Account.SystemGroupID)
+	c.Account.SystemGroupName = c.getString("account.systemGroupName", c.Account.SystemGroupName)
+	c.Account.AdminUID = c.getString("account.adminUID", c.Account.AdminUID)
+	c.Account.AdminUID = c.getString("account.noticeMessage", c.Account.SystemNoticeMessage)
+	c.Account.AdminUID = c.getString("account.noticeLike", c.Account.SystemNoticeLike)
+	c.Account.AdminUID = c.getString("account.noticeFollow", c.Account.SystemNoticeFollow)
+	c.Account.AdminUID = c.getString("account.noticeComment", c.Account.SystemNoticeComment)
+
+	//#################### 文件服务 ####################
+	c.FileService = FileService(c.getString("fileService", c.FileService.String()))
+	// aliyun oss
+	c.OSS.Endpoint = c.getString("oss.endpoint", c.OSS.Endpoint)
+	c.OSS.BucketURL = c.getString("oss.bucketURL", c.OSS.BucketURL)
+	c.OSS.AccessKeyID = c.getString("oss.accessKeyID", c.OSS.AccessKeyID)
+	c.OSS.AccessKeySecret = c.getString("oss.accessKeySecret", c.OSS.AccessKeySecret)
+	c.OSS.BucketName = c.getString("oss.bucketName", c.OSS.BucketName)
+	// minio
+	c.Minio.URL = c.getString("minio.url", c.Minio.URL)
+	if c.FileService == FileServiceMinio {
+		if strings.TrimSpace(c.Minio.URL) == "" {
+			c.Minio.URL = fmt.Sprintf("http://%s:9000", c.External.IP)
+		}
+	}
+	c.Minio.UploadURL = c.getString("minio.uploadURL", c.Minio.UploadURL)
+	if strings.TrimSpace(c.Minio.UploadURL) == "" {
+		c.Minio.UploadURL = c.Minio.URL
+	}
+	c.Minio.DownloadURL = c.getString("minio.downloadURL", c.Minio.DownloadURL)
+	if strings.TrimSpace(c.Minio.DownloadURL) == "" {
+		c.Minio.DownloadURL = c.Minio.URL
+	}
+
+	c.Minio.AccessKeyID = c.getString("minio.accessKeyID", c.Minio.AccessKeyID)
+	c.Minio.SecretAccessKey = c.getString("minio.secretAccessKey", c.Minio.SecretAccessKey)
+	// seaweedfs
+	c.Seaweed.URL = c.getString("seaweed.url", c.Seaweed.URL)
+	// qiniu 七牛云
+	c.Qiniu.URL = c.getString("qiniu.url", c.Qiniu.URL)
+	c.Qiniu.BucketName = c.getString("qiniu.bucketName", c.Qiniu.BucketName)
+	c.Qiniu.AccessKey = c.getString("qiniu.accessKey", c.Qiniu.AccessKey)
+	c.Qiniu.SecretKey = c.getString("qiniu.secretKey", c.Qiniu.SecretKey)
+
+	//#################### 短信服务 ####################
+	c.SMSCode = c.getString("smsCode", c.SMSCode)
+	c.SMSProvider = SMSProvider(c.getString("smsProvider", string(c.SMSProvider)))
+
+	// AliyunSMS
+	c.AliyunSMS.AccessKeyID = c.getString("aliyunSMS.accessKeyID", c.AliyunSMS.AccessKeyID)
+	c.AliyunSMS.AccessSecret = c.getString("aliyunSMS.accessSecret", c.AliyunSMS.AccessSecret)
+	c.AliyunSMS.TemplateCode = c.getString("aliyunSMS.templateCode", c.AliyunSMS.TemplateCode)
+	c.AliyunSMS.SignName = c.getString("aliyunSMS.signName", c.AliyunSMS.SignName)
+
+	//#################### organization ####################
+	c.Organization.ImportOn = c.getBool("organization.importOn", c.Organization.ImportOn)
+	//#################### 好友 ###############
+	c.Friend.AddedTipsText = c.getString("friend.addedTipsText", c.Friend.AddedTipsText)
+	//#################### ZincSearch ####################
+	c.ZincSearch.SearchOn = c.getBool("zincSearch.searchOn", c.ZincSearch.SearchOn)
+	c.ZincSearch.APIURL = c.getString("zincSearch.apiURL", c.ZincSearch.APIURL)
+	c.ZincSearch.ZincUsername = c.getString("zincSearch.username", c.ZincSearch.ZincUsername)
+	c.ZincSearch.ZincPassword = c.getString("zincSearch.password", c.ZincSearch.ZincPassword)
+	c.ZincSearch.SyncIntervalSecond = c.getInt("zincSearch.syncIntervalSecond", c.ZincSearch.SyncIntervalSecond)
+	c.ZincSearch.SyncCount = c.getInt("zincSearch.syncCount", c.ZincSearch.SyncCount)
+
+	//#################### tracing ####################
+	c.Tracing.On = c.getBool("tracing.on", c.Tracing.On)
+	c.Tracing.Addr = c.getString("tracing.addr", c.Tracing.Addr)
+
+}
+
+func (c *Config) ConfigFileUsed() string {
+	return c.vp.ConfigFileUsed()
+}
+
+func (c *Config) configureLog() {
+	logLevel := c.vp.GetInt("logger.level")
+	// level
+	if logLevel == 0 { // 没有设置
+		if c.Mode == DebugMode {
+			logLevel = int(zapcore.DebugLevel)
+		} else {
+			logLevel = int(zapcore.InfoLevel)
+		}
+	} else {
+		logLevel = logLevel - 2
+	}
+	c.Logger.Level = zapcore.Level(logLevel)
+	c.Logger.Dir = c.vp.GetString("logger.dir")
+	if strings.TrimSpace(c.Logger.Dir) == "" {
+		c.Logger.Dir = "logs"
+	}
+	if !strings.HasPrefix(strings.TrimSpace(c.Logger.Dir), "/") {
+		c.Logger.Dir = filepath.Join(c.RootDir, c.Logger.Dir)
+	}
+	c.Logger.LineNum = c.vp.GetBool("logger.lineNum")
+}
+
+func (c *Config) getString(key string, defaultValue string) string {
+	v := c.vp.GetString(key)
+	if v == "" {
+		return defaultValue
+	}
+	return v
+}
+
+func (c *Config) getBool(key string, defaultValue bool) bool {
+	objV := c.vp.Get(key)
+	if objV == nil {
+		return defaultValue
+	}
+	return cast.ToBool(objV)
+}
+func (c *Config) getInt(key string, defaultValue int) int {
+	v := c.vp.GetInt(key)
+	if v == 0 {
+		return defaultValue
+	}
+	return v
+}
+
+func (c *Config) getInt64(key string, defaultValue int64) int64 {
+	v := c.vp.GetInt64(key)
+	if v == 0 {
+		return defaultValue
+	}
+	return v
+}
+
+func (c *Config) getDuration(key string, defaultValue time.Duration) time.Duration {
+	v := c.vp.GetDuration(key)
+	if v == 0 {
+		return defaultValue
+	}
+	return v
+}
+
+// GetEnv 成环境变量里获取
+func GetEnv(key string, defaultValue string) string {
+	v := os.Getenv(key)
+	if strings.TrimSpace(v) == "" {
+		return defaultValue
+	}
+	return v
+}
+
+// GetEnvBool 成环境变量里获取
+func GetEnvBool(key string, defaultValue bool) bool {
+	v := os.Getenv(key)
+	if strings.TrimSpace(v) == "" {
+		return defaultValue
+	}
+	if v == "true" {
+		return true
+	}
+	return false
+}
+
+// GetEnvInt64 环境变量获取
+func GetEnvInt64(key string, defaultValue int64) int64 {
+	v := os.Getenv(key)
+	if strings.TrimSpace(v) == "" {
+		return defaultValue
+	}
+	i, _ := strconv.ParseInt(v, 10, 64)
+	return i
+}
+
+// GetEnvInt 环境变量获取
+func GetEnvInt(key string, defaultValue int) int {
+	v := os.Getenv(key)
+	if strings.TrimSpace(v) == "" {
+		return defaultValue
+	}
+	i, _ := strconv.ParseInt(v, 10, 64)
+	return int(i)
+}
+
+// GetEnvFloat64 环境变量获取
+func GetEnvFloat64(key string, defaultValue float64) float64 {
+	v := os.Getenv(key)
+	if strings.TrimSpace(v) == "" {
+		return defaultValue
+	}
+	i, _ := strconv.ParseFloat(v, 64)
+	return i
+}
+
+// StringEnv StringEnv
+func StringEnv(v *string, key string) {
+	vv := os.Getenv(key)
+	if vv != "" {
+		*v = vv
+	}
+}
+
+// BoolEnv 环境bool值
+func BoolEnv(b *bool, key string) {
+	value := os.Getenv(key)
+	if strings.TrimSpace(value) != "" {
+		if value == "true" {
+			*b = true
+		} else {
+			*b = false
+		}
+	}
+}
+
+// 获取内网地址
+func getIntranetIP() string {
+	intranetIPs, err := util.GetIntranetIP()
+	if err != nil {
+		panic(err)
+	}
+	if len(intranetIPs) > 0 {
+		return intranetIPs[0]
+	}
+	return ""
+}
+
+// SMSProvider 短信供应者
+type SMSProvider string
+
+const (
+	// SMSProviderAliyun aliyun
+	SMSProviderAliyun SMSProvider = "aliyun"
+	SMSProviderUnisms SMSProvider = "unisms" // 联合短信(https://unisms.apistd.com/docs/api/send/)
+)
+
+// AliyunSMSConfig 阿里云短信
+type AliyunSMSConfig struct {
+	AccessKeyID  string // aliyun的AccessKeyID
+	AccessSecret string // aliyun的AccessSecret
+	TemplateCode string // aliyun的短信模版
+	SignName     string // 签名
+}
+
+// aliyun oss
+type OSSConfig struct {
+	Endpoint        string
+	BucketName      string // Bucket名称 比如 tangsengdaodao
+	BucketURL       string // 文件下载地址域名 对应aliyun的Bucket域名
+	AccessKeyID     string
+	AccessKeySecret string
+}
+
+type MinioConfig struct {
+	URL             string // 文件下载上传或下载基地址 例如： http://127.0.0.1:9000
+	UploadURL       string // 文件上传基地址 如果为空则使用URL地址
+	DownloadURL     string // 文件下载基地址 如果为空则使用URL地址
+	AccessKeyID     string //minio accessKeyID
+	SecretAccessKey string //minio secretAccessKey
+}
+
+type SeaweedConfig struct {
+	URL string // 文件下载上传基地址
+}
+
+type QiniuConfig struct {
+	URL        string
+	BucketName string
+	AccessKey  string
+	SecretKey  string
+}
+
+type duration struct {
+	time.Duration
+}
+
+func (d *duration) UnmarshalText(text []byte) error {
+	var err error
+	d.Duration, err = time.ParseDuration(string(text))
+	return err
+}
